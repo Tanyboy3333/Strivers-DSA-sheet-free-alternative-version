@@ -1,380 +1,639 @@
-import { useState, useEffect, useCallback } from 'react';
-import { Search, ExternalLink, BookOpen, Menu, X } from 'lucide-react';
-import Sidebar from './components/Sidebar';
-import QuestionModal from './components/QuestionModal';
+import { useState, useMemo, useCallback, useEffect } from "react";
+import {
+  Menu,
+  X,
+  ChevronDown,
+  ChevronRight,
+  ExternalLink,
+  CheckCircle2,
+  Circle,
+  Flame,
+  BookOpen,
+  Code2,
+  Zap,
+  Trophy,
+  ArrowUpRight,
+} from "lucide-react";
 import {
   dsaSheetData,
-  getTotalProblems,
-  Step,
-  Problem,
-} from './data/dsaSheetData';
+  getTotalProblemCount,
+  getStepProblemCount,
+  type Step,
+  type Problem,
+} from "./data/dsaSheetData";
 
+// ─── Badge colours by difficulty ──────────────────────────
+const diffColor: Record<string, string> = {
+  Easy: "bg-emerald-500/15 text-emerald-400 border border-emerald-500/30",
+  Medium: "bg-amber-500/15 text-amber-400 border border-amber-500/30",
+  Hard: "bg-red-500/15 text-red-400 border border-red-500/30",
+};
+
+// ─── Platform badge colours ──────────────────────────────
+const platformStyles: Record<string, string> = {
+  leetcode: "bg-[#FFA116]/15 text-[#FFA116] border border-[#FFA116]/30",
+  gfg: "bg-[#2F8D46]/15 text-[#2F8D46] border border-[#2F8D46]/30",
+  codingninjas: "bg-[#6C63FF]/15 text-[#6C63FF] border border-[#6C63FF]/30",
+};
+
+// ─── Problem Modal ───────────────────────────────────────
+function ProblemModal({
+  problem,
+  onClose,
+  solved,
+  onToggle,
+}: {
+  problem: Problem;
+  onClose: () => void;
+  solved: boolean;
+  onToggle: () => void;
+}) {
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => e.key === "Escape" && onClose();
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [onClose]);
+
+  const links = [
+    { label: "LeetCode", url: problem.leetcode, key: "leetcode" as const },
+    { label: "GeeksforGeeks", url: problem.gfg, key: "gfg" as const },
+    {
+      label: "Coding Ninjas",
+      url: problem.codingninjas,
+      key: "codingninjas" as const,
+    },
+  ];
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4"
+      onClick={onClose}
+    >
+      <div
+        className="relative w-full max-w-lg rounded-2xl border border-gray-700/60 bg-gray-900 p-6 shadow-2xl animate-fadeIn"
+        onClick={(e) => e.stopPropagation()}
+      >
+        {/* Close */}
+        <button
+          onClick={onClose}
+          className="absolute right-4 top-4 text-gray-400 hover:text-white transition"
+        >
+          <X size={20} />
+        </button>
+
+        {/* Title */}
+        <h2 className="text-xl font-bold text-white pr-8 mb-2">
+          {problem.name}
+        </h2>
+
+        {/* Difficulty */}
+        <span
+          className={`inline-block rounded-full px-3 py-0.5 text-xs font-semibold mb-5 ${diffColor[problem.difficulty]}`}
+        >
+          {problem.difficulty}
+        </span>
+
+        {/* Solved toggle */}
+        <button
+          onClick={onToggle}
+          className={`w-full mb-5 flex items-center justify-center gap-2 rounded-xl py-3 text-sm font-semibold transition-all ${
+            solved
+              ? "bg-emerald-500/20 text-emerald-400 border border-emerald-500/40"
+              : "bg-gray-800 text-gray-300 border border-gray-700 hover:border-gray-500"
+          }`}
+        >
+          {solved ? (
+            <>
+              <CheckCircle2 size={18} /> Solved ✓
+            </>
+          ) : (
+            <>
+              <Circle size={18} /> Mark as Solved
+            </>
+          )}
+        </button>
+
+        {/* Practice Links */}
+        <div className="space-y-3">
+          <p className="text-xs uppercase tracking-wider text-gray-500 font-semibold">
+            Practice Links
+          </p>
+          {links.map(
+            (link) =>
+              link.url && (
+                <a
+                  key={link.key}
+                  href={link.url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className={`flex items-center justify-between rounded-xl px-4 py-3 text-sm font-medium transition hover:scale-[1.02] ${platformStyles[link.key]}`}
+                >
+                  <span className="flex items-center gap-2">
+                    <Code2 size={16} />
+                    {link.label}
+                  </span>
+                  <ExternalLink size={14} />
+                </a>
+              )
+          )}
+          {!links.some((l) => l.url) && (
+            <p className="text-gray-500 text-sm italic">
+              No practice links available for this problem.
+            </p>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Main App ────────────────────────────────────────────
 export default function App() {
+  const [sidebarOpen, setSidebarOpen] = useState(false);
   const [activeStepIndex, setActiveStepIndex] = useState(0);
-  const [activeSubStepIndex, setActiveSubStepIndex] = useState(0);
   const [expandedSteps, setExpandedSteps] = useState<Set<number>>(new Set([0]));
-  const [searchQuery, setSearchQuery] = useState('');
-  const [selectedProblem, setSelectedProblem] = useState<Problem | null>(null);
-  const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
+  const [selectedProblem, setSelectedProblem] = useState<{
+    problem: Problem;
+    stepIdx: number;
+    subIdx: number;
+    probIdx: number;
+  } | null>(null);
 
-  const totalProblems = getTotalProblems();
+  // Load solved state from localStorage
+  const [solvedMap, setSolvedMap] = useState<Record<string, boolean>>(() => {
+    try {
+      const saved = localStorage.getItem("tanyboy-solved");
+      return saved ? JSON.parse(saved) : {};
+    } catch {
+      return {};
+    }
+  });
 
-  // Get current step and sub-step
-  const currentStep: Step = dsaSheetData[activeStepIndex];
-  const currentSubStep = currentStep?.subSteps[activeSubStepIndex];
-  const currentProblems = currentSubStep?.problems || [];
+  useEffect(() => {
+    localStorage.setItem("tanyboy-solved", JSON.stringify(solvedMap));
+  }, [solvedMap]);
 
-  // Filter problems based on search
-  const filteredProblems = searchQuery
-    ? currentProblems.filter((p) =>
-        p.name.toLowerCase().includes(searchQuery.toLowerCase())
-      )
-    : currentProblems;
+  const totalProblems = useMemo(() => getTotalProblemCount(), []);
 
-  const toggleStep = useCallback((stepIndex: number) => {
-    setExpandedSteps((prev) => {
-      const next = new Set(prev);
-      if (next.has(stepIndex)) {
-        next.delete(stepIndex);
-      } else {
-        next.add(stepIndex);
-      }
-      return next;
+  const solvedCount = useMemo(() => {
+    let count = 0;
+    dsaSheetData.forEach((step, si) => {
+      step.subsections.forEach((sub, sbi) => {
+        sub.problems.forEach((_, pi) => {
+          if (solvedMap[`${si}-${sbi}-${pi}`]) count++;
+        });
+      });
     });
-  }, []);
+    return count;
+  }, [solvedMap]);
 
-  const handleSelectSubStep = useCallback(
-    (stepIndex: number, subStepIndex: number) => {
-      setActiveStepIndex(stepIndex);
-      setActiveSubStepIndex(subStepIndex);
-      setExpandedSteps((prev) => new Set(prev).add(stepIndex));
-      setMobileSidebarOpen(false);
+  const toggleSolved = useCallback(
+    (si: number, sbi: number, pi: number) => {
+      const key = `${si}-${sbi}-${pi}`;
+      setSolvedMap((prev) => ({ ...prev, [key]: !prev[key] }));
     },
     []
   );
 
-  // Close modal on Escape key
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        setSelectedProblem(null);
-      }
-    };
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, []);
+  const toggleExpand = (idx: number) => {
+    setExpandedSteps((prev) => {
+      const next = new Set(prev);
+      if (next.has(idx)) next.delete(idx);
+      else next.add(idx);
+      return next;
+    });
+  };
 
-  // Search across all problems globally when search query exists
-  const globalSearchResults = searchQuery
-    ? dsaSheetData.flatMap((step, si) =>
-        step.subSteps.flatMap((sub, ssi) =>
-          sub.problems
-            .filter((p) =>
-              p.name.toLowerCase().includes(searchQuery.toLowerCase())
-            )
-            .map((p) => ({ ...p, stepIndex: si, subStepIndex: ssi, stepTitle: step.title, subStepTitle: sub.title }))
-        )
-      )
-    : [];
+  const selectStep = (idx: number) => {
+    setActiveStepIndex(idx);
+    if (!expandedSteps.has(idx)) {
+      setExpandedSteps((prev) => new Set(prev).add(idx));
+    }
+    setSidebarOpen(false);
+  };
+
+  const activeStep = dsaSheetData[activeStepIndex];
+
+  // Step-wise solved count
+  const getStepSolvedCount = (step: Step, stepIdx: number) => {
+    let count = 0;
+    step.subsections.forEach((_, sbi) => {
+      _.problems.forEach((_, pi) => {
+        if (solvedMap[`${stepIdx}-${sbi}-${pi}`]) count++;
+      });
+    });
+    return count;
+  };
+
+  const progressPct = totalProblems > 0 ? ((solvedCount / totalProblems) * 100).toFixed(1) : "0";
 
   return (
-    <div className="flex h-screen bg-[#0d1117] text-white font-sans">
-      {/* Mobile sidebar overlay */}
-      {mobileSidebarOpen && (
+    <div className="flex h-screen bg-gray-950 text-gray-100 overflow-hidden">
+      {/* ─── Overlay for mobile sidebar ─── */}
+      {sidebarOpen && (
         <div
-          className="fixed inset-0 z-40 bg-black/50 lg:hidden"
-          onClick={() => setMobileSidebarOpen(false)}
+          className="fixed inset-0 z-30 bg-black/50 lg:hidden"
+          onClick={() => setSidebarOpen(false)}
         />
       )}
 
-      {/* Sidebar - Desktop */}
-      <div className="hidden lg:block">
-        <Sidebar
-          steps={dsaSheetData}
-          activeStepIndex={activeStepIndex}
-          activeSubStepIndex={activeSubStepIndex}
-          onSelectSubStep={handleSelectSubStep}
-          expandedSteps={expandedSteps}
-          toggleStep={toggleStep}
-          searchQuery=""
-        />
-      </div>
-
-      {/* Sidebar - Mobile */}
-      <div
-        className={`fixed inset-y-0 left-0 z-50 lg:hidden transition-transform duration-300 ${
-          mobileSidebarOpen ? 'translate-x-0' : '-translate-x-full'
+      {/* ─── Sidebar ─── */}
+      <aside
+        className={`fixed z-40 lg:static inset-y-0 left-0 flex flex-col w-72 bg-gray-900/95 backdrop-blur border-r border-gray-800 transition-transform duration-300 ${
+          sidebarOpen ? "translate-x-0" : "-translate-x-full lg:translate-x-0"
         }`}
       >
-        <Sidebar
-          steps={dsaSheetData}
-          activeStepIndex={activeStepIndex}
-          activeSubStepIndex={activeSubStepIndex}
-          onSelectSubStep={handleSelectSubStep}
-          expandedSteps={expandedSteps}
-          toggleStep={toggleStep}
-          searchQuery=""
-        />
-      </div>
+        {/* Sidebar Header */}
+        <div className="p-5 border-b border-gray-800">
+          <div className="flex items-center justify-between">
+            <h1 className="text-base font-black tracking-tight text-white">
+              <span className="text-cyan-400">TANYBOY</span>'S SHEET
+            </h1>
+            <button
+              className="lg:hidden text-gray-400 hover:text-white"
+              onClick={() => setSidebarOpen(false)}
+            >
+              <X size={20} />
+            </button>
+          </div>
+          <p className="text-[10px] text-gray-500 mt-1 uppercase tracking-widest">
+            Striver's A2Z DSA Course
+          </p>
 
-      {/* Main Content */}
-      <div className="flex flex-1 flex-col overflow-hidden">
-        {/* Header */}
-        <header className="flex items-center gap-4 border-b border-gray-800 bg-[#0d1117] px-4 py-3 lg:px-6">
-          {/* Mobile menu button */}
-          <button
-            onClick={() => setMobileSidebarOpen(!mobileSidebarOpen)}
-            className="rounded-lg p-2 text-gray-400 hover:bg-gray-800 lg:hidden"
+          {/* Original link */}
+          <a
+            href="https://takeuforward.org/dsa/strivers-a2z-sheet-learn-dsa-a-to-z"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="mt-3 flex items-center gap-1.5 text-[11px] font-semibold text-cyan-400 hover:text-cyan-300 transition"
           >
-            {mobileSidebarOpen ? <X size={20} /> : <Menu size={20} />}
-          </button>
+            <ArrowUpRight size={12} />
+            View Original Sheet
+          </a>
 
-          <div className="flex flex-1 items-center gap-2 sm:gap-3 min-w-0">
-            <div className="flex items-center gap-2 shrink-0">
-              <div className="relative flex h-8 w-8 items-center justify-center rounded-lg bg-gradient-to-br from-blue-600 to-cyan-500 shadow-lg shadow-blue-500/20">
-                <BookOpen size={16} className="text-white" />
-                <div className="absolute -right-0.5 -bottom-0.5 h-2.5 w-2.5 rounded-full bg-emerald-400 ring-2 ring-[#0d1117]" />
-              </div>
+          {/* Progress bar */}
+          <div className="mt-4">
+            <div className="flex justify-between text-[11px] text-gray-400 mb-1">
+              <span>Progress</span>
+              <span className="font-mono">
+                {solvedCount}/{totalProblems} ({progressPct}%)
+              </span>
             </div>
-            <div className="flex flex-col min-w-0">
+            <div className="h-2 rounded-full bg-gray-800 overflow-hidden">
+              <div
+                className="h-full rounded-full bg-gradient-to-r from-cyan-500 to-blue-500 transition-all duration-500"
+                style={{ width: `${progressPct}%` }}
+              />
+            </div>
+          </div>
+        </div>
+
+        {/* Steps List */}
+        <nav className="flex-1 overflow-y-auto py-2 scrollbar-thin">
+          {dsaSheetData.map((step, idx) => {
+            const stepCount = getStepProblemCount(step);
+            const stepSolved = getStepSolvedCount(step, idx);
+            const isActive = activeStepIndex === idx;
+
+            return (
+              <div key={idx}>
+                <button
+                  onClick={() => {
+                    selectStep(idx);
+                    toggleExpand(idx);
+                  }}
+                  className={`w-full flex items-center gap-2 px-4 py-3 text-left transition-all ${
+                    isActive
+                      ? "bg-cyan-500/10 text-cyan-400 border-l-2 border-cyan-400"
+                      : "text-gray-300 hover:bg-gray-800/60 border-l-2 border-transparent"
+                  }`}
+                >
+                  <span
+                    className={`flex-shrink-0 flex items-center justify-center w-7 h-7 rounded-lg text-xs font-bold ${
+                      isActive
+                        ? "bg-cyan-500/20 text-cyan-400"
+                        : "bg-gray-800 text-gray-400"
+                    }`}
+                  >
+                    {step.step}
+                  </span>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-medium truncate">{step.title}</p>
+                    <p className="text-[10px] text-gray-500">
+                      {stepSolved}/{stepCount} solved
+                    </p>
+                  </div>
+                  {stepSolved === stepCount && stepCount > 0 ? (
+                    <CheckCircle2
+                      size={16}
+                      className="text-emerald-400 flex-shrink-0"
+                    />
+                  ) : (
+                    <ChevronRight
+                      size={14}
+                      className={`flex-shrink-0 text-gray-600 transition-transform ${
+                        expandedSteps.has(idx) ? "rotate-90" : ""
+                      }`}
+                    />
+                  )}
+                </button>
+
+                {/* Subsections in sidebar */}
+                {isActive && expandedSteps.has(idx) && (
+                  <div className="pl-14 pr-4 pb-2 space-y-1">
+                    {step.subsections.map((sub, subIdx) => (
+                      <button
+                        key={subIdx}
+                        className="w-full text-left text-xs text-gray-500 hover:text-gray-300 py-1 transition"
+                        onClick={() => {
+                          const el = document.getElementById(
+                            `subsection-${idx}-${subIdx}`
+                          );
+                          el?.scrollIntoView({ behavior: "smooth" });
+                        }}
+                      >
+                        {sub.title}
+                        <span className="ml-1 text-gray-600">
+                          ({sub.problems.length})
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </nav>
+
+        {/* Footer */}
+        <div className="p-4 border-t border-gray-800 text-center">
+          <p className="text-[10px] text-gray-600">
+            Tanyboy's Version • {totalProblems} Problems
+          </p>
+        </div>
+      </aside>
+
+      {/* ─── Main Content ─── */}
+      <main className="flex-1 flex flex-col min-w-0">
+        {/* Top Bar */}
+        <header className="sticky top-0 z-20 bg-gray-950/90 backdrop-blur border-b border-gray-800">
+          <div className="flex items-center gap-3 px-4 sm:px-6 py-4">
+            <button
+              className="lg:hidden text-gray-400 hover:text-white transition"
+              onClick={() => setSidebarOpen(true)}
+            >
+              <Menu size={22} />
+            </button>
+
+            <div className="flex-1 min-w-0">
               <div className="flex items-center gap-2 flex-wrap">
+                <h1 className="text-lg sm:text-xl font-black text-white">
+                  Striver's A2Z DSA Course/Sheet
+                </h1>
+                <span className="hidden sm:inline-flex items-center gap-1 rounded-full bg-gradient-to-r from-cyan-500/20 to-blue-500/20 border border-cyan-500/30 px-3 py-0.5 text-[11px] font-bold text-cyan-400">
+                  <Flame size={12} />
+                  TANYBOY'S VERSION
+                </span>
+              </div>
+              <div className="flex items-center gap-3 mt-0.5">
+                <p className="text-sm text-gray-400">
+                  {totalProblems} Problems
+                </p>
+                <span className="text-gray-700">•</span>
+                <p className="text-sm text-gray-400">
+                  {solvedCount} Solved ({progressPct}%)
+                </p>
+                <span className="hidden sm:inline text-gray-700">•</span>
                 <a
                   href="https://takeuforward.org/dsa/strivers-a2z-sheet-learn-dsa-a-to-z"
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="group flex items-center gap-1 text-sm font-semibold text-gray-200 hover:text-blue-400 transition-colors sm:text-base"
+                  className="hidden sm:inline-flex items-center gap-1 text-sm text-cyan-400 hover:text-cyan-300 transition font-medium"
                 >
-                  <span className="truncate">Striver's A2Z DSA Course/Sheet</span>
-                  <ExternalLink size={13} className="shrink-0 opacity-0 group-hover:opacity-100 transition-opacity text-blue-400" />
+                  <BookOpen size={14} />
+                  Original Sheet
                 </a>
-                <span className="hidden sm:inline-flex items-center gap-1 rounded-full bg-gradient-to-r from-violet-500/15 to-fuchsia-500/15 border border-violet-500/25 px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-widest text-violet-300 shrink-0">
-                  <span className="inline-block h-1.5 w-1.5 rounded-full bg-violet-400 animate-pulse" />
-                  Tanyboy's Version
-                </span>
               </div>
-              <div className="flex items-center gap-2 mt-0.5">
-                <span className="inline-flex items-center rounded-full bg-blue-500/10 px-2 py-0 text-[11px] font-medium text-blue-400 border border-blue-500/20">
-                  {totalProblems} Problems
-                </span>
-                <span className="hidden sm:inline text-[11px] text-gray-600">•</span>
-                <span className="hidden sm:inline text-[11px] text-gray-500">No Database • No Login • Just Practice</span>
+            </div>
+
+            {/* Stats */}
+            <div className="hidden md:flex items-center gap-4">
+              <div className="text-center">
+                <p className="text-lg font-black text-emerald-400">
+                  {solvedCount}
+                </p>
+                <p className="text-[10px] text-gray-500 uppercase tracking-wider">
+                  Solved
+                </p>
+              </div>
+              <div className="text-center">
+                <p className="text-lg font-black text-cyan-400">
+                  {totalProblems - solvedCount}
+                </p>
+                <p className="text-[10px] text-gray-500 uppercase tracking-wider">
+                  Remaining
+                </p>
+              </div>
+              <div className="text-center">
+                <p className="text-lg font-black text-amber-400">
+                  {progressPct}%
+                </p>
+                <p className="text-[10px] text-gray-500 uppercase tracking-wider">
+                  Complete
+                </p>
               </div>
             </div>
           </div>
 
-          {/* Search */}
-          <div className="relative w-48 sm:w-64">
-            <Search
-              size={16}
-              className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500"
-            />
-            <input
-              type="text"
-              placeholder="Search problems..."
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              className="w-full rounded-lg border border-gray-700 bg-[#161b22] py-2 pl-9 pr-3 text-sm text-gray-200 placeholder-gray-500 outline-none transition-colors focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
-            />
-            {searchQuery && (
-              <button
-                onClick={() => setSearchQuery('')}
-                className="absolute right-2 top-1/2 -translate-y-1/2 rounded p-0.5 text-gray-500 hover:text-gray-300"
-              >
-                <X size={14} />
-              </button>
-            )}
+          {/* Tanyboy mobile badge */}
+          <div className="sm:hidden px-4 pb-2">
+            <span className="inline-flex items-center gap-1 rounded-full bg-gradient-to-r from-cyan-500/20 to-blue-500/20 border border-cyan-500/30 px-3 py-0.5 text-[11px] font-bold text-cyan-400">
+              <Flame size={12} />
+              TANYBOY'S VERSION
+            </span>
           </div>
         </header>
 
-        {/* Content */}
-        <main className="flex-1 overflow-y-auto bg-[#0d1117] px-4 py-6 lg:px-8">
-          {/* Search Results Mode */}
-          {searchQuery ? (
-            <div>
-              <div className="mb-6">
-                <h2 className="text-2xl font-bold text-white">
-                  Search Results
+        {/* Step Content */}
+        <div className="flex-1 overflow-y-auto px-4 sm:px-6 lg:px-8 py-6">
+          {/* Step Header */}
+          <div className="mb-8">
+            <div className="flex items-center gap-3 mb-2">
+              <span className="flex items-center justify-center w-10 h-10 rounded-xl bg-cyan-500/15 text-cyan-400 font-black text-lg">
+                {activeStep.step}
+              </span>
+              <div>
+                <h2 className="text-2xl font-black text-white">
+                  {activeStep.title}
                 </h2>
-                <p className="mt-1 text-sm text-gray-400">
-                  Found {globalSearchResults.length} problem(s) matching "{searchQuery}"
+                <p className="text-sm text-gray-400">
+                  {getStepSolvedCount(activeStep, activeStepIndex)}/
+                  {getStepProblemCount(activeStep)} problems solved
                 </p>
               </div>
-
-              {globalSearchResults.length > 0 ? (
-                <div className="space-y-2">
-                  {globalSearchResults.map((problem) => (
-                    <div
-                      key={problem.id}
-                      onClick={() => setSelectedProblem(problem)}
-                      className="group flex items-center gap-4 rounded-xl border border-gray-800 bg-[#161b22] px-4 py-3 transition-all hover:border-gray-600 hover:bg-[#1c2333] cursor-pointer"
-                    >
-                      <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-gray-800 text-xs font-bold text-gray-400 group-hover:bg-blue-500/20 group-hover:text-blue-400 transition-colors">
-                        {problem.id}
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <h3 className="text-sm font-medium text-gray-200 truncate group-hover:text-white">
-                          {problem.name}
-                        </h3>
-                        <p className="text-xs text-gray-500 mt-0.5">
-                          Step {dsaSheetData[problem.stepIndex].stepNumber} &gt; {problem.stepTitle} &gt; {problem.subStepTitle}
-                        </p>
-                      </div>
-                      <div className="flex items-center gap-2 shrink-0">
-                        {problem.difficulty && (
-                          <span
-                            className={`rounded-full px-2.5 py-0.5 text-xs font-medium ${
-                              problem.difficulty === 'Easy'
-                                ? 'bg-emerald-500/10 text-emerald-400'
-                                : problem.difficulty === 'Medium'
-                                ? 'bg-yellow-500/10 text-yellow-400'
-                                : 'bg-red-500/10 text-red-400'
-                            }`}
-                          >
-                            {problem.difficulty}
-                          </span>
-                        )}
-                        {problem.leetcode && (
-                          <a
-                            href={problem.leetcode}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            onClick={(e) => e.stopPropagation()}
-                            className="rounded-lg p-1.5 text-gray-500 transition-colors hover:bg-gray-700 hover:text-amber-400"
-                          >
-                            <ExternalLink size={14} />
-                          </a>
-                        )}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              ) : (
-                <div className="flex flex-col items-center justify-center py-20 text-gray-500">
-                  <Search size={48} className="mb-4 opacity-30" />
-                  <p className="text-lg font-medium">No problems found</p>
-                  <p className="text-sm">Try a different search term</p>
-                </div>
-              )}
             </div>
-          ) : (
-            /* Normal Mode - Current Section */
-            <div>
-              {/* Section Header */}
-              <div className="mb-6">
-                <div className="flex items-center gap-2 text-sm text-gray-500 mb-1">
-                  <span>Step {currentStep.stepNumber}</span>
-                  <span>›</span>
-                  <span className="text-gray-400">{currentStep.title}</span>
-                </div>
-                <h2 className="text-2xl font-bold text-white">
-                  {currentSubStep?.title}
-                </h2>
-                <p className="mt-1 text-sm text-gray-400">
-                  {filteredProblems.length} problem{filteredProblems.length !== 1 ? 's' : ''} in this section
-                </p>
+            {/* Step progress bar */}
+            <div className="mt-3 h-1.5 rounded-full bg-gray-800 overflow-hidden">
+              <div
+                className="h-full rounded-full bg-gradient-to-r from-cyan-500 to-blue-500 transition-all duration-500"
+                style={{
+                  width: `${
+                    getStepProblemCount(activeStep) > 0
+                      ? (getStepSolvedCount(activeStep, activeStepIndex) /
+                          getStepProblemCount(activeStep)) *
+                        100
+                      : 0
+                  }%`,
+                }}
+              />
+            </div>
+          </div>
+
+          {/* Subsections */}
+          {activeStep.subsections.map((subsection, subIdx) => (
+            <div
+              key={subIdx}
+              id={`subsection-${activeStepIndex}-${subIdx}`}
+              className="mb-8"
+            >
+              <div className="flex items-center gap-2 mb-4">
+                <Zap size={16} className="text-cyan-400" />
+                <h3 className="text-lg font-bold text-white">
+                  {subsection.title}
+                </h3>
+                <span className="text-xs text-gray-500 bg-gray-800 rounded-full px-2 py-0.5">
+                  {subsection.problems.length} problems
+                </span>
               </div>
 
-              {/* Problems List */}
-              {filteredProblems.length > 0 ? (
-                <div className="space-y-2">
-                  {/* Table Header */}
-                  <div className="hidden sm:flex items-center gap-4 px-4 py-2 text-xs font-semibold uppercase tracking-wider text-gray-500">
-                    <div className="w-10 text-center">#</div>
-                    <div className="flex-1">Problem Name</div>
-                    <div className="w-20 text-center">Difficulty</div>
-                    <div className="w-28 text-center">Links</div>
-                  </div>
+              <div className="grid gap-2">
+                {subsection.problems.map((problem, probIdx) => {
+                  const key = `${activeStepIndex}-${subIdx}-${probIdx}`;
+                  const isSolved = solvedMap[key] || false;
 
-                  {filteredProblems.map((problem, index) => (
-                    <div
-                      key={problem.id}
-                      onClick={() => setSelectedProblem(problem)}
-                      className="group flex items-center gap-3 sm:gap-4 rounded-xl border border-gray-800/50 bg-[#161b22] px-3 sm:px-4 py-3 transition-all hover:border-gray-600 hover:bg-[#1c2333] cursor-pointer"
+                  return (
+                    <button
+                      key={probIdx}
+                      onClick={() =>
+                        setSelectedProblem({
+                          problem,
+                          stepIdx: activeStepIndex,
+                          subIdx,
+                          probIdx,
+                        })
+                      }
+                      className={`group flex items-center gap-3 rounded-xl px-4 py-3 text-left transition-all duration-200 ${
+                        isSolved
+                          ? "bg-emerald-500/8 border border-emerald-500/20 hover:bg-emerald-500/15"
+                          : "bg-gray-900/50 border border-gray-800 hover:bg-gray-800/70 hover:border-gray-700"
+                      }`}
                     >
-                      {/* Problem Number */}
-                      <div className="flex h-8 w-8 sm:w-10 shrink-0 items-center justify-center rounded-lg bg-gray-800/80 text-xs font-bold text-gray-500 group-hover:bg-blue-500/20 group-hover:text-blue-400 transition-colors">
-                        {index + 1}
-                      </div>
-
-                      {/* Problem Name */}
-                      <div className="flex-1 min-w-0">
-                        <h3 className="text-sm font-medium text-gray-200 group-hover:text-white truncate transition-colors">
-                          {problem.name}
-                        </h3>
-                      </div>
-
-                      {/* Difficulty */}
-                      <div className="shrink-0">
-                        {problem.difficulty ? (
-                          <span
-                            className={`inline-block rounded-full px-2.5 py-0.5 text-xs font-medium ${
-                              problem.difficulty === 'Easy'
-                                ? 'bg-emerald-500/10 text-emerald-400'
-                                : problem.difficulty === 'Medium'
-                                ? 'bg-yellow-500/10 text-yellow-400'
-                                : 'bg-red-500/10 text-red-400'
-                            }`}
-                          >
-                            {problem.difficulty}
-                          </span>
+                      {/* Solved indicator */}
+                      <div
+                        className="flex-shrink-0 cursor-pointer"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          toggleSolved(activeStepIndex, subIdx, probIdx);
+                        }}
+                      >
+                        {isSolved ? (
+                          <CheckCircle2
+                            size={20}
+                            className="text-emerald-400"
+                          />
                         ) : (
-                          <span className="inline-block rounded-full bg-gray-700/50 px-2.5 py-0.5 text-xs font-medium text-gray-500">
-                            Theory
-                          </span>
+                          <Circle
+                            size={20}
+                            className="text-gray-600 group-hover:text-gray-400 transition"
+                          />
                         )}
                       </div>
 
-                      {/* Links */}
-                      <div className="flex items-center gap-1.5 shrink-0">
+                      {/* Problem number */}
+                      <span className="flex-shrink-0 w-7 text-xs font-mono text-gray-500">
+                        {probIdx + 1}.
+                      </span>
+
+                      {/* Problem name */}
+                      <span
+                        className={`flex-1 text-sm font-medium truncate ${
+                          isSolved
+                            ? "text-emerald-300 line-through"
+                            : "text-gray-200"
+                        }`}
+                      >
+                        {problem.name}
+                      </span>
+
+                      {/* Difficulty badge */}
+                      <span
+                        className={`hidden sm:inline-flex rounded-full px-2.5 py-0.5 text-[10px] font-bold ${diffColor[problem.difficulty]}`}
+                      >
+                        {problem.difficulty}
+                      </span>
+
+                      {/* Available platforms */}
+                      <div className="hidden sm:flex items-center gap-1">
                         {problem.leetcode && (
-                          <a
-                            href={problem.leetcode}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            onClick={(e) => e.stopPropagation()}
-                            title="Solve on LeetCode"
-                            className="rounded-lg p-1.5 text-gray-500 transition-colors hover:bg-amber-500/20 hover:text-amber-400"
-                          >
-                            <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
-                              <path d="M16.102 17.93l-2.697 2.607c-.466.467-1.111.662-1.823.662s-1.357-.195-1.824-.662l-4.332-4.363c-.467-.467-.702-1.15-.702-1.863s.235-1.357.702-1.824l4.319-4.38c.467-.467 1.125-.645 1.837-.645s1.357.195 1.823.662l2.697 2.606c.514.515 1.365.497 1.9-.038.535-.536.553-1.387.039-1.901l-2.609-2.636a5.055 5.055 0 0 0-2.445-1.337l2.467-2.503c.516-.514.498-1.366-.037-1.901-.535-.535-1.387-.552-1.902-.038l-10.1 10.101c-1.349 1.337-1.349 3.529 0 4.879l4.38 4.363c1.35 1.35 3.529 1.35 4.878 0l2.698-2.607c.514-.515.496-1.366-.039-1.902-.535-.535-1.387-.552-1.901-.037z"/>
-                            </svg>
-                          </a>
+                          <span className="text-[10px] font-semibold text-[#FFA116] bg-[#FFA116]/10 rounded px-1.5 py-0.5">
+                            LC
+                          </span>
                         )}
                         {problem.gfg && (
-                          <a
-                            href={problem.gfg}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            onClick={(e) => e.stopPropagation()}
-                            title="Solve on GeeksforGeeks"
-                            className="rounded-lg p-1.5 text-gray-500 transition-colors hover:bg-green-500/20 hover:text-green-400"
-                          >
-                            <ExternalLink size={14} />
-                          </a>
+                          <span className="text-[10px] font-semibold text-[#2F8D46] bg-[#2F8D46]/10 rounded px-1.5 py-0.5">
+                            GFG
+                          </span>
                         )}
-                        {!problem.leetcode && !problem.gfg && (
-                          <span className="text-xs text-gray-600 px-2">—</span>
+                        {problem.codingninjas && (
+                          <span className="text-[10px] font-semibold text-[#6C63FF] bg-[#6C63FF]/10 rounded px-1.5 py-0.5">
+                            CN
+                          </span>
                         )}
                       </div>
-                    </div>
-                  ))}
-                </div>
-              ) : (
-                <div className="flex flex-col items-center justify-center py-20 text-gray-500">
-                  <BookOpen size={48} className="mb-4 opacity-30" />
-                  <p className="text-lg font-medium">No problems in this section</p>
-                  <p className="text-sm">Select a different section from the sidebar</p>
-                </div>
-              )}
-            </div>
-          )}
-        </main>
-      </div>
 
-      {/* Question Modal */}
+                      <ChevronDown
+                        size={14}
+                        className="flex-shrink-0 text-gray-600 group-hover:text-gray-400 transition -rotate-90"
+                      />
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          ))}
+
+          {/* Footer CTA */}
+          <div className="mt-12 mb-8 text-center">
+            <div className="inline-flex items-center gap-2 rounded-2xl bg-gray-900 border border-gray-800 px-6 py-4">
+              <Trophy size={20} className="text-amber-400" />
+              <span className="text-sm text-gray-300">
+                {solvedCount === 0
+                  ? "Start solving to track your progress!"
+                  : solvedCount === totalProblems
+                  ? "🎉 All problems solved! Amazing!"
+                  : `${totalProblems - solvedCount} more to go. Keep going!`}
+              </span>
+            </div>
+          </div>
+        </div>
+      </main>
+
+      {/* ─── Modal ─── */}
       {selectedProblem && (
-        <QuestionModal
-          problem={selectedProblem}
+        <ProblemModal
+          problem={selectedProblem.problem}
+          solved={
+            solvedMap[
+              `${selectedProblem.stepIdx}-${selectedProblem.subIdx}-${selectedProblem.probIdx}`
+            ] || false
+          }
+          onToggle={() =>
+            toggleSolved(
+              selectedProblem.stepIdx,
+              selectedProblem.subIdx,
+              selectedProblem.probIdx
+            )
+          }
           onClose={() => setSelectedProblem(null)}
         />
       )}

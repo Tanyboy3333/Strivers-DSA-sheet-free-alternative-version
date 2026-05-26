@@ -1,17 +1,8 @@
 @import "tailwindcss";
 
-/* Custom font */
-body {
-  font-family: 'Inter', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-  background-color: #0d1117;
-  color: #e6edf3;
-  overflow: hidden;
-}
-
-/* Custom scrollbar styles */
+/* Custom scrollbar */
 ::-webkit-scrollbar {
   width: 6px;
-  height: 6px;
 }
 
 ::-webkit-scrollbar-track {
@@ -19,40 +10,42 @@ body {
 }
 
 ::-webkit-scrollbar-thumb {
-  background-color: #30363d;
+  background: #374151;
   border-radius: 3px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background-color: #484f58;
+  background: #4b5563;
 }
 
-/* Smooth transitions for sidebar */
-.sidebar-transition {
-  transition: transform 0.3s ease-in-out;
+/* Animation */
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: scale(0.95) translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
 }
 
-/* Prevent body scroll when modal is open */
-body.modal-open {
-  overflow: hidden;
+.animate-fadeIn {
+  animation: fadeIn 0.2s ease-out;
 }
 
-/* Custom selection color */
+/* Selection */
 ::selection {
-  background-color: rgba(59, 130, 246, 0.3);
+  background: rgba(34, 211, 238, 0.3);
   color: white;
 }
 
-/* High-tech animated pulse for Tanyboy badge */
-@keyframes subtle-glow {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.5; }
+/* Smooth scrolling */
+html {
+  scroll-behavior: smooth;
 }
 
-/* Gradient text for special elements */
-.gradient-text {
-  background: linear-gradient(135deg, #818cf8, #a78bfa, #c084fc);
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-  background-clip: text;
+body {
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 }
