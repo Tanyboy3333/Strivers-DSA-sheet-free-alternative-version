@@ -257,7 +257,7 @@ export default function App() {
             </button>
           </div>
           <p className="text-[10px] text-gray-500 mt-1 uppercase tracking-widest">
-            Striver's A2Z DSA Course
+            Tanyboy's A2Z DSA Course
           </p>
 
           {/* Original link */}
